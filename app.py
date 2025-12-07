@@ -117,7 +117,6 @@ with tab_user:
     st.divider()
     st.caption("現在の空き状況")
     if not df.empty:
-        # 利用者向けに見やすい表を作成
         status_view = df[['locker_id', 'status']].copy()
         status_view = status_view.rename(columns={'locker_id': 'ロッカー番号', 'status': '状態'})
         status_view['状態'] = status_view['状態'].replace({'available': '🔵 空き', 'in_use': '🔴 使用中'})
@@ -129,23 +128,39 @@ with tab_user:
 with tab_admin:
     st.header("管理者メニュー")
     
-    password = st.text_input("管理者パスワード", type="password")
-    if password == "admin123":
-        st.success("認証成功")
-        
+    # ログイン状態を管理する変数を初期化
+    if 'admin_logged_in' not in st.session_state:
+        st.session_state.admin_logged_in = False
+
+    # --- ログインしていない場合 ---
+    if not st.session_state.admin_logged_in:
+        password = st.text_input("管理者パスワード", type="password")
+        if st.button("ログイン"):
+            if password == "admin123":
+                st.session_state.admin_logged_in = True
+                st.rerun() # 画面を再読み込みして管理者画面を表示
+            else:
+                st.error("パスワードが間違っています")
+
+    # --- ログイン済みの場合 ---
+    else:
+        # ヘッダー部分（認証済みメッセージとログアウトボタン）
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.success("✅ 管理者としてログイン中")
+        with col2:
+            if st.button("ログアウト"):
+                st.session_state.admin_logged_in = False
+                st.rerun() # 画面を再読み込みしてログイン画面に戻る
+
         # --- 1. 一覧表示（日本語化・列整理） ---
         st.subheader("📋 利用状況一覧")
         if not df.empty:
-            # 表示用にデータをコピーして加工
             display_df = df.copy()
-            
-            # 不要な列 (last_updated) を削除し、必要な列だけ抽出
-            # データフレームに存在するか確認してから抽出
             target_cols = ['locker_id', 'status', 'student_id', 'user_name']
             cols_to_use = [c for c in target_cols if c in display_df.columns]
             display_df = display_df[cols_to_use]
 
-            # 列名を日本語に変更
             display_df = display_df.rename(columns={
                 'locker_id': 'ロッカー番号',
                 'status': '状態',
@@ -153,7 +168,6 @@ with tab_admin:
                 'user_name': '氏名'
             })
 
-            # 状態の中身も日本語に変更
             display_df['状態'] = display_df['状態'].replace({
                 'available': '空き',
                 'in_use': '使用中'
@@ -161,7 +175,6 @@ with tab_admin:
 
             st.dataframe(display_df, use_container_width=True, hide_index=True)
             
-            # CSVダウンロードも日本語化されたデータで行う
             csv = display_df.to_csv(index=False).encode('utf-8')
             st.download_button("CSVダウンロード", csv, "lockers.csv", "text/csv")
 
