@@ -1,174 +1,121 @@
 import streamlit as st
 import boto3
+from botocore.exceptions import ClientError
 import pandas as pd
-from datetime import datetime
-from decimal import Decimal
 
-# ---------------------------------------------------------
-# 設定（自分の環境に合わせて変更してください）
-# ---------------------------------------------------------
-TABLE_NAME = "Lockers"  # AWSで作ったテーブル名
-REGION_NAME = "ap-northeast-1"  # 東京リージョン
-
-# ---------------------------------------------------------
-# AWS DynamoDBへの接続設定
-# ---------------------------------------------------------
-# キャッシュを使って接続を高速化
-@st.cache_resource
-def get_dynamodb_resource():
-    # Streamlit CloudのSecrets機能から鍵を読み込む
-    return boto3.resource(
+# --------------------------------------------------
+# 1. AWS DynamoDBへの接続設定
+# --------------------------------------------------
+try:
+    # Secretsから認証情報を取得して接続
+    dynamodb = boto3.resource(
         'dynamodb',
-        region_name=REGION_NAME,
+        region_name=st.secrets["AWS_DEFAULT_REGION"],
         aws_access_key_id=st.secrets["AWS_ACCESS_KEY_ID"],
         aws_secret_access_key=st.secrets["AWS_SECRET_ACCESS_KEY"]
     )
-
-try:
-    dynamodb = get_dynamodb_resource()
-    table = dynamodb.Table(TABLE_NAME)
+    # ★テーブル名を正しいもの('Lockers')に指定
+    table = dynamodb.Table('Lockers')
 except Exception as e:
-    st.error(f"AWSへの接続に失敗しました。Secretsが設定されているか確認してください。\nエラー: {e}")
+    st.error(f"AWS接続エラー: {e}")
     st.stop()
 
-# ---------------------------------------------------------
-# 関数定義
-# ---------------------------------------------------------
-
-def get_all_lockers():
-    """ロッカーの全データを取得してDataFrameにする"""
+# --------------------------------------------------
+# 2. データの取得・更新関数
+# --------------------------------------------------
+def get_lockers():
+    """DynamoDBから全ロッカーの情報を取得する"""
     try:
         response = table.scan()
-        items = response.get('Items', [])
-        
-        if not items:
-            return pd.DataFrame()
+        items = response['Items']
+        # locker_id順に並べ替え（1, 2, 3...）
+        return sorted(items, key=lambda x: int(x['locker_id']))
+    except ClientError as e:
+        st.error(f"データ取得失敗: {e}")
+        return []
 
-        # Decimal型をint/floatに変換（エラー回避のため）
-        for item in items:
-            for key, value in item.items():
-                if isinstance(value, Decimal):
-                    item[key] = int(value)
-        
-        df = pd.DataFrame(items)
-        
-        # 表示を見やすく並べ替え（locker_id順）
-        if 'locker_id' in df.columns:
-            df = df.sort_values('locker_id')
-            
-        return df
-    except Exception as e:
-        st.error(f"データの取得に失敗しました: {e}")
-        return pd.DataFrame()
-
-def update_locker(locker_id, user_name, status):
-    """ロッカーの状態を更新する"""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    
+def update_locker_status(locker_id, new_status):
+    """ロッカーの状態を更新する (available <-> in_use)"""
     try:
-        # 使用開始の場合
-        if status == "使用中":
-            table.update_item(
-                Key={'locker_id': int(locker_id)},
-                UpdateExpression="set #st = :s, user_name = :u, last_updated = :t",
-                ExpressionAttributeNames={'#st': 'status'},  # statusは予約語のため別名使用
-                ExpressionAttributeValues={
-                    ':s': '使用中',
-                    ':u': user_name,
-                    ':t': timestamp
-                }
-            )
-            st.success(f"ロッカー {locker_id} を {user_name} さんが使用開始しました！")
-            
-        # 返却（空きにする）場合
-        else:
-            table.update_item(
-                Key={'locker_id': int(locker_id)},
-                UpdateExpression="set #st = :s, user_name = :u, last_updated = :t",
-                ExpressionAttributeNames={'#st': 'status'},
-                ExpressionAttributeValues={
-                    ':s': '空き',
-                    ':u': '-',  # 名前をハイフンに戻す
-                    ':t': timestamp
-                }
-            )
-            st.success(f"ロッカー {locker_id} を返却しました！")
-            
-    except Exception as e:
-        st.error(f"更新エラー: {e}")
-
-# ---------------------------------------------------------
-# アプリの画面構成（UI）
-# ---------------------------------------------------------
-
-st.title("🔐 クラウド・ロッカー管理システム")
-st.caption("AWS DynamoDB x Streamlit 連携版")
-
-# 再読み込みボタン
-if st.button('🔄 最新状態に更新'):
-    st.rerun()
-
-# データの読み込み
-df = get_all_lockers()
-
-# --- 現在の状況を表示（メトリクス） ---
-if not df.empty and 'status' in df.columns:
-    total_lockers = len(df)
-    used_lockers = len(df[df['status'] == '使用中'])
-    free_lockers = total_lockers - used_lockers
-    
-    col1, col2, col3 = st.columns(3)
-    col1.metric("全ロッカー数", f"{total_lockers} 個")
-    col2.metric("使用中", f"{used_lockers} 個", delta_color="inverse")
-    col3.metric("空き", f"{free_lockers} 個")
-else:
-    st.warning("データがありません。DynamoDBにデータが入っているか確認してください。")
-
-st.divider()
-
-# --- 操作パネル（2列レイアウト） ---
-col_action, col_view = st.columns([1, 2])
-
-with col_action:
-    st.subheader("🛠 操作パネル")
-    
-    # ロッカーIDのリストを作成（データがあれば）
-    if not df.empty and 'locker_id' in df.columns:
-        locker_list = df['locker_id'].tolist()
-    else:
-        locker_list = [1, 2, 3, 4, 5] # デフォルト値
-
-    # 入力フォーム
-    target_id = st.selectbox("ロッカーNo.を選択", locker_list)
-    user_name_input = st.text_input("利用者名（使用時のみ入力）")
-
-    # ボタン配置
-    col_btn1, col_btn2 = st.columns(2)
-    with col_btn1:
-        if st.button("利用開始", type="primary"):
-            if user_name_input:
-                update_locker(target_id, user_name_input, "使用中")
-                st.rerun() # 画面更新
-            else:
-                st.warning("利用者名を入力してください")
-    
-    with col_btn2:
-        if st.button("返却する"):
-            update_locker(target_id, "-", "空き")
-            st.rerun() # 画面更新
-
-with col_view:
-    st.subheader("📋 現在のロッカー一覧")
-    if not df.empty:
-        # データフレームを表示（statusで色分けなどはシンプル化のため省略）
-        st.dataframe(
-            df, 
-            column_config={
-                "locker_id": "No.",
-                "status": "状態",
-                "user_name": "利用者",
-                "last_updated": "最終更新"
-            },
-            hide_index=True,
-            use_container_width=True
+        table.update_item(
+            Key={'locker_id': str(locker_id)}, # IDは文字列で渡す
+            UpdateExpression="set #st = :s",
+            ExpressionAttributeNames={'#st': 'status'},
+            ExpressionAttributeValues={':s': new_status}
         )
+        st.success(f"ロッカー {locker_id} を更新しました！")
+    except ClientError as e:
+        st.error(f"更新失敗: {e}")
+
+# --------------------------------------------------
+# 3. アプリの画面構成（タブ作成）
+# --------------------------------------------------
+st.title("ロッカー管理システム 🔐")
+
+# ★ここでタブを作成します
+tab_user, tab_admin = st.tabs(["🙋 利用者画面", "⚙️ 管理者画面"])
+
+# ==========================================
+# 【タブ1】利用者画面 (ロッカーの貸出/返却)
+# ==========================================
+with tab_user:
+    st.header("ロッカーの利用状況")
+    st.write("ボタンを押して使用/空きを変更できます。")
+
+    # データを取得
+    lockers = get_lockers()
+
+    if not lockers:
+        st.info("データがありません。")
+    else:
+        # 3列のカラムを作成して並べる
+        cols = st.columns(3)
+        for i, locker in enumerate(lockers):
+            locker_id = locker['locker_id']
+            status = locker['status']
+            
+            # カラムを循環させる (col1 -> col2 -> col3 -> col1...)
+            with cols[i % 3]:
+                st.write(f"### 🚪 {locker_id}")
+                
+                if status == 'available':
+                    st.success("空き")
+                    if st.button(f"使う", key=f"use_{locker_id}"):
+                        update_locker_status(locker_id, 'in_use')
+                        st.rerun() # 画面更新
+                else:
+                    st.error("使用中")
+                    if st.button(f"終了する", key=f"end_{locker_id}"):
+                        update_locker_status(locker_id, 'available')
+                        st.rerun() # 画面更新
+                st.divider()
+
+# ==========================================
+# 【タブ2】管理者画面 (一覧表示・リセット)
+# ==========================================
+with tab_admin:
+    st.header("管理者用メニュー")
+    
+    # 簡易的なパスワード機能（任意）
+    password = st.text_input("管理者パスワードを入力", type="password")
+    
+    if password == "admin123":  # パスワードが合っている時だけ表示
+        st.success("ログイン成功")
+        
+        # 現在のデータを表で表示
+        st.subheader("データベースの中身")
+        lockers_data = get_lockers()
+        if lockers_data:
+            df = pd.DataFrame(lockers_data)
+            st.dataframe(df) # 表を表示
+        
+        st.divider()
+        st.warning("⚠️ 危険な操作エリア")
+        if st.button("全ロッカーを「空き」にリセットする"):
+            # ここに全リセットの処理を書く（今回は省略）
+            st.write("リセット機能はまだ実装していません！")
+            
+    elif password:
+        st.error("パスワードが違います")
+    else:
+        st.info("パスワードを入力してください")
