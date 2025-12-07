@@ -93,6 +93,15 @@ tab_user, tab_admin = st.tabs(["🙋 利用者画面", "⚙️ 管理者画面"]
 with tab_user:
     st.header("利用開始 (登録)")
     
+    # 登録完了メッセージをセッションステートで管理
+    if 'rent_success_message' not in st.session_state:
+        st.session_state.rent_success_message = None
+
+    # 成功メッセージがあれば表示し、すぐにクリア
+    if st.session_state.rent_success_message:
+        st.success(st.session_state.rent_success_message)
+        st.session_state.rent_success_message = None # メッセージをクリア
+
     if not df.empty and 'status' in df.columns:
         available_lockers = df[df['status'] == 'available']['locker_id'].tolist()
     else:
@@ -111,8 +120,9 @@ with tab_user:
                 if not u_sid or not u_name:
                     st.error("すべての項目を入力してください。")
                 elif rent_locker(u_locker, u_sid, u_name):
-                    st.success(f"ロッカー番号 {u_locker} を借りました！")
-                    st.rerun()
+                    # 成功メッセージをセッションステートに保存
+                    st.session_state.rent_success_message = f"ロッカー番号 **{u_locker}** の登録が完了しました！"
+                    st.rerun() # 再読み込みでメッセージを表示
 
     st.divider()
     st.caption("現在の空き状況")
