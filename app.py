@@ -20,24 +20,36 @@ except Exception as e:
     st.stop()
 
 # --------------------------------------------------
-# 2. データの取得・更新・初期化関数
+# 2. データの取得・更新・初期化・削除関数
 # --------------------------------------------------
 def get_lockers():
     """DynamoDBから全ロッカーの情報を取得する"""
     try:
         response = table.scan()
         items = response['Items']
-        # 数字順 (1, 2, 10...) に並べ替えるための処理
+        # 数字順に並べ替え（数字以外は後ろへ）
         def sort_key(item):
             try:
                 return int(item['locker_id'])
             except ValueError:
                 return 99999
-        
         return sorted(items, key=sort_key)
     except ClientError as e:
         st.error(f"データ取得失敗: {e}")
         return []
+
+def delete_all_lockers():
+    """【追加】全てのデータを削除する（L001なども消えます）"""
+    try:
+        # スキャンして全データを取得
+        scan = table.scan()
+        with table.batch_writer() as batch:
+            for each in scan['Items']:
+                batch.delete_item(Key={'locker_id': each['locker_id']})
+        return True
+    except Exception as e:
+        st.error(f"全削除失敗: {e}")
+        return False
 
 def initialize_lockers():
     """1番から200番までのロッカーを一括作成・リセットする"""
@@ -112,13 +124,11 @@ tab_user, tab_admin = st.tabs(["🙋 利用者画面", "⚙️ 管理者画面"]
 with tab_user:
     st.header("利用開始 (登録)")
     
-    # --- 空きロッカーの取得 ---
     if not df.empty and 'status' in df.columns:
         available_lockers = df[df['status'] == 'available']['locker_id'].tolist()
     else:
         available_lockers = []
         
-    # --- 登録フォーム ---
     if not available_lockers:
         st.warning("現在、空いているロッカーはありません。")
     else:
@@ -128,7 +138,6 @@ with tab_user:
             u_sid = st.text_input("学籍番号 (例: 2403036)")
             u_name = st.text_input("氏名 (例: 埼玉太郎)")
             
-            # 返却機能は削除し、登録ボタンのみ配置
             if st.form_submit_button("利用開始", type="primary"):
                 if not u_sid or not u_name:
                     st.error("すべての項目を入力してください。")
@@ -188,11 +197,23 @@ with tab_admin:
         
         st.divider()
 
-        # --- 3. システム設定（初期化） ---
+        # --- 3. システム設定 ---
         st.subheader("⚠️ システム設定")
-        st.warning("このボタンを押すと、ロッカー番号1〜200が作成・リセットされます。")
-        if st.button("データ初期化 (1~200番を作成)", type="secondary"):
-            with st.spinner("データベースを作成中..."):
-                if initialize_lockers():
-                    st.success("1番から200番のロッカーを作成しました！")
-                    st.rerun()
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.warning("手順1: 既存データを全て消す")
+            if st.button("🗑️ 全データ削除 (L001等も削除)", type="primary"):
+                with st.spinner("削除中..."):
+                    if delete_all_lockers():
+                        st.success("全てのデータを削除しました。")
+                        st.rerun()
+
+        with col2:
+            st.info("手順2: 1〜200番を作り直す")
+            if st.button("🔄 データ初期化 (1~200番を作成)"):
+                with st.spinner("作成中..."):
+                    if initialize_lockers():
+                        st.success("1番から200番のロッカーを作成しました！")
+                        st.rerun()
