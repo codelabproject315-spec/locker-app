@@ -2,19 +2,19 @@ import streamlit as st
 import boto3
 from botocore.exceptions import ClientError
 import pandas as pd
+from datetime import datetime
+from decimal import Decimal
 
 # --------------------------------------------------
 # 1. AWS DynamoDBへの接続設定
 # --------------------------------------------------
 try:
-    # Secretsから認証情報を取得して接続
     dynamodb = boto3.resource(
         'dynamodb',
         region_name=st.secrets["AWS_DEFAULT_REGION"],
         aws_access_key_id=st.secrets["AWS_ACCESS_KEY_ID"],
         aws_secret_access_key=st.secrets["AWS_SECRET_ACCESS_KEY"]
     )
-    # ★テーブル名を正しいもの('Lockers')に指定
     table = dynamodb.Table('Lockers')
 except Exception as e:
     st.error(f"AWS接続エラー: {e}")
@@ -28,94 +28,154 @@ def get_lockers():
     try:
         response = table.scan()
         items = response['Items']
-        # locker_id順に並べ替え（1, 2, 3...）
+        # locker_id順に並べ替え（文字として並べ替え）
         return sorted(items, key=lambda x: x['locker_id'])
     except ClientError as e:
         st.error(f"データ取得失敗: {e}")
         return []
 
-def update_locker_status(locker_id, new_status):
-    """ロッカーの状態を更新する (available <-> in_use)"""
+def rent_locker(locker_id, student_id, user_name):
+    """ロッカーを借りる（情報を保存して使用中にする）"""
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     try:
         table.update_item(
-            Key={'locker_id': str(locker_id)}, # IDは文字列で渡す
-            UpdateExpression="set #st = :s",
+            Key={'locker_id': str(locker_id)},
+            UpdateExpression="set #st = :s, student_id = :sid, user_name = :u, last_updated = :t",
             ExpressionAttributeNames={'#st': 'status'},
-            ExpressionAttributeValues={':s': new_status}
+            ExpressionAttributeValues={
+                ':s': 'in_use',
+                ':sid': student_id,
+                ':u': user_name,
+                ':t': timestamp
+            }
         )
-        st.success(f"ロッカー {locker_id} を更新しました！")
+        return True
     except ClientError as e:
         st.error(f"更新失敗: {e}")
+        return False
+
+def return_locker(locker_id):
+    """ロッカーを返却する（空きにする）"""
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    try:
+        table.update_item(
+            Key={'locker_id': str(locker_id)},
+            UpdateExpression="set #st = :s, student_id = :empty, user_name = :empty, last_updated = :t",
+            ExpressionAttributeNames={'#st': 'status'},
+            ExpressionAttributeValues={
+                ':s': 'available',
+                ':empty': '-', # 情報を消す
+                ':t': timestamp
+            }
+        )
+        return True
+    except ClientError as e:
+        st.error(f"返却失敗: {e}")
+        return False
 
 # --------------------------------------------------
-# 3. アプリの画面構成（タブ作成）
+# 3. アプリの画面構成
 # --------------------------------------------------
 st.title("ロッカー管理システム 🔐")
 
-# ★ここでタブを作成します
+# データを取得
+lockers = get_lockers()
+df = pd.DataFrame(lockers)
+
+# タブ作成
 tab_user, tab_admin = st.tabs(["🙋 利用者画面", "⚙️ 管理者画面"])
 
 # ==========================================
-# 【タブ1】利用者画面 (ロッカーの貸出/返却)
+# 【タブ1】利用者画面 (借りる・返す)
 # ==========================================
 with tab_user:
-    st.header("ロッカーの利用状況")
-    st.write("ボタンを押して使用/空きを変更できます。")
-
-    # データを取得
-    lockers = get_lockers()
-
-    if not lockers:
-        st.info("データがありません。")
-    else:
-        # 3列のカラムを作成して並べる
-        cols = st.columns(3)
-        for i, locker in enumerate(lockers):
-            locker_id = locker['locker_id']
-            status = locker['status']
+    st.header("利用申請")
+    
+    # --- 操作を選んでもらう ---
+    action = st.radio("操作を選択してください", ["利用開始 (借りる)", "利用終了 (返す)"], horizontal=True)
+    
+    if action == "利用開始 (借りる)":
+        st.subheader("🔑 ロッカーを借りる")
+        
+        # 空いているロッカーだけをリストアップ
+        if not df.empty and 'status' in df.columns:
+            available_lockers = df[df['status'] == 'available']['locker_id'].tolist()
+        else:
+            available_lockers = []
             
-            # カラムを循環させる (col1 -> col2 -> col3 -> col1...)
-            with cols[i % 3]:
-                st.write(f"### 🚪 {locker_id}")
+        if not available_lockers:
+            st.warning("現在、空いているロッカーはありません。")
+        else:
+            with st.form("rent_form"):
+                # 入力フォーム
+                selected_locker = st.selectbox("ロッカー番号を選択", available_lockers)
+                input_student_id = st.text_input("学籍番号 (例: 2403036)")
+                input_name = st.text_input("氏名 (例: 埼玉太郎)")
                 
-                if status == 'available':
-                    st.success("空き")
-                    if st.button(f"使う", key=f"use_{locker_id}"):
-                        update_locker_status(locker_id, 'in_use')
-                        st.rerun() # 画面更新
-                else:
-                    st.error("使用中")
-                    if st.button(f"終了する", key=f"end_{locker_id}"):
-                        update_locker_status(locker_id, 'available')
-                        st.rerun() # 画面更新
-                st.divider()
+                submitted = st.form_submit_button("利用開始", type="primary")
+                
+                if submitted:
+                    if not input_student_id or not input_name:
+                        st.error("学籍番号と氏名を入力してください。")
+                    else:
+                        if rent_locker(selected_locker, input_student_id, input_name):
+                            st.success(f"{selected_locker} の利用を開始しました！")
+                            st.rerun()
+
+    elif action == "利用終了 (返す)":
+        st.subheader("↩️ ロッカーを返す")
+        
+        # 使用中のロッカーをリストアップ
+        if not df.empty and 'status' in df.columns:
+            in_use_lockers = df[df['status'] == 'in_use']['locker_id'].tolist()
+        else:
+            in_use_lockers = []
+            
+        if not in_use_lockers:
+            st.info("現在、使用中のロッカーはありません。")
+        else:
+            with st.form("return_form"):
+                return_locker_id = st.selectbox("返却するロッカー番号を選択", in_use_lockers)
+                return_submitted = st.form_submit_button("返却する")
+                
+                if return_submitted:
+                    if return_locker(return_locker_id):
+                        st.success(f"{return_locker_id} を返却しました。")
+                        st.rerun()
+    
+    st.divider()
+    st.write("現在の空き状況:")
+    # 利用者には個人情報を見せず、状態だけ表示
+    if not df.empty:
+        status_view = df[['locker_id', 'status']].copy()
+        status_view['status'] = status_view['status'].apply(lambda x: "🔵 空き" if x == "available" else "🔴 使用中")
+        st.dataframe(status_view, hide_index=True, use_container_width=True)
 
 # ==========================================
-# 【タブ2】管理者画面 (一覧表示・リセット)
+# 【タブ2】管理者画面 (詳細確認・リセット)
 # ==========================================
 with tab_admin:
-    st.header("管理者用メニュー")
+    st.header("管理者メニュー")
     
-    # 簡易的なパスワード機能（任意）
-    password = st.text_input("管理者パスワードを入力", type="password")
-    
-    if password == "admin123":  # パスワードが合っている時だけ表示
-        st.success("ログイン成功")
+    password = st.text_input("管理者パスワード", type="password")
+    if password == "admin123":
+        st.success("認証成功")
         
-        # 現在のデータを表で表示
-        st.subheader("データベースの中身")
-        lockers_data = get_lockers()
-        if lockers_data:
-            df = pd.DataFrame(lockers_data)
-            st.dataframe(df) # 表を表示
+        st.subheader("📋 利用状況一覧")
+        if not df.empty:
+            # 管理者には全ての情報（学籍番号・氏名など）を表示
+            st.dataframe(df, use_container_width=True)
+            
+            # CSVダウンロードボタン
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "データをCSVでダウンロード",
+                csv,
+                "lockers.csv",
+                "text/csv",
+                key='download-csv'
+            )
         
         st.divider()
-        st.warning("⚠️ 危険な操作エリア")
-        if st.button("全ロッカーを「空き」にリセットする"):
-            # ここに全リセットの処理を書く（今回は省略）
-            st.write("リセット機能はまだ実装していません！")
-            
-    elif password:
-        st.error("パスワードが違います")
-    else:
-        st.info("パスワードを入力してください")
+        st.write("メンテナンス:")
+        # 強制返却などの機能が必要ならここに追加できます
