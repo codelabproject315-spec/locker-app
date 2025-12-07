@@ -1,11 +1,7 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
-import streamlit_authenticator as stauth
-import yaml
-import os
 import boto3
 from botocore.exceptions import ClientError
+import pandas as pd
 from datetime import datetime
 
 # --------------------------------------------------
@@ -24,23 +20,27 @@ except Exception as e:
     st.stop()
 
 # --------------------------------------------------
-# 2. データの取得・更新・初期化・削除関数
+# 2. データの取得・更新・初期化関数
 # --------------------------------------------------
 def get_lockers():
+    """DynamoDBから全ロッカーの情報を取得する"""
     try:
         response = table.scan()
         items = response['Items']
+        # 数字順 (1, 2, 10...) に並べ替えるための処理
         def sort_key(item):
             try:
                 return int(item['locker_id'])
             except ValueError:
                 return 99999
+        
         return sorted(items, key=sort_key)
     except ClientError as e:
         st.error(f"データ取得失敗: {e}")
         return []
 
 def initialize_lockers():
+    """1番から200番までのロッカーを一括作成・リセットする"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     try:
         with table.batch_writer() as batch:
@@ -94,198 +94,105 @@ def return_locker(locker_id):
         st.error(f"返却失敗: {e}")
         return False
 
-# ★★★ ロッカー削除用の関数 ★★★
-def delete_locker(locker_id):
-    try:
-        table.delete_item(Key={'locker_id': str(locker_id)})
-        return True
-    except ClientError as e:
-        st.error(f"削除失敗: {e}")
-        return False
-
 # --------------------------------------------------
 # 3. アプリの画面構成
 # --------------------------------------------------
-st.set_page_config(page_title="ロッカー管理システム", layout="wide")
+st.title("ロッカー管理システム 🔐")
 
 # データを取得
 lockers = get_lockers()
 df = pd.DataFrame(lockers)
 
-# メッセージ用
-if 'admin_message' not in st.session_state:
-    st.session_state.admin_message = ""
-if 'viewer_message' not in st.session_state:
-    st.session_state.viewer_message = ""
+# タブ作成
+tab_user, tab_admin = st.tabs(["🙋 利用者画面", "⚙️ 管理者画面"])
 
-# --- 認証設定 ---
-admin_user = os.environ.get("ADMIN_USER")
-admin_hash = os.environ.get("ADMIN_HASH")
-cookie_name = os.environ.get("COOKIE_NAME")
-cookie_key = os.environ.get("COOKIE_KEY")
-
-credentials = {
-    "usernames": {
-        admin_user: {
-            "email": admin_user,
-            "name": admin_user, 
-            "password": admin_hash 
-        }
-    }
-}
-
-authenticator = stauth.Authenticate(
-    credentials,
-    cookie_name,
-    cookie_key,
-    3600
-)
-
-st.title('ロッカー管理システム 🔐')
-ADMIN_EMAIL = admin_user
-
-# --- タブコンテンツ関数 ---
-
-def display_viewer_tab():
-    st.header('ロッカー空き状況')
+# ==========================================
+# 【タブ1】利用者画面（登録のみ）
+# ==========================================
+with tab_user:
+    st.header("利用開始 (登録)")
     
-    # 状態表示用のDataFrame作成
-    if not df.empty:
-        status_df = df[['locker_id', 'status']].copy()
-        # L001などが混ざっていても表示はする
-        st.dataframe(status_df, use_container_width=True, height=300)
-    else:
-        st.warning("データがありません。")
-
-    st.divider() 
-    st.header('ロッカー新規登録')
-    
-    if not df.empty:
+    # --- 空きロッカーの取得 ---
+    if not df.empty and 'status' in df.columns:
         available_lockers = df[df['status'] == 'available']['locker_id'].tolist()
     else:
         available_lockers = []
-    
-    if not available_lockers:
-        st.info('現在、登録できる空きロッカーがありません。')
-    else:
-        locker_no_reg_tab1 = st.selectbox(
-            '空いているロッカーを選択してください:', 
-            available_list_tab1, 
-            key='reg_locker_select_tab1',
-            index=None, 
-            placeholder="ロッカー番号を選択..." 
-        )
-        student_id_reg_tab1 = st.text_input('学籍番号 (例: 2403036)', key='reg_sid_tab1')
-        name_reg_tab1 = st.text_input('氏名 (例: 埼玉太郎)', key='reg_name_tab1')
         
-        col1, col2 = st.columns([1, 2]) 
-        with col1:
-            if st.button('この内容で登録する', key='reg_button_tab1'):
-                if not locker_no_reg_tab1 or not student_id_reg_tab1 or not name_reg_tab1:
-                    st.error('すべての項目を入力してください。')
-                else:
-                    rent_locker(locker_no_reg_tab1, student_id_reg_tab1, name_reg_tab1)
-                    st.session_state.viewer_message = f"【登録完了】ロッカー '{locker_no_reg_tab1}' を登録しました。"
-                    st.rerun()
-        with col2:
-            if st.session_state.viewer_message:
-                st.success(st.session_state.viewer_message)
-                st.session_state.viewer_message = ""
-
-def display_admin_tab():
-    st.header('管理者パネル')
-    
-    if st.session_state.admin_message:
-        st.success(st.session_state.admin_message)
-        st.session_state.admin_message = "" 
-
-    st.subheader('📝 ロッカー新規登録 (管理者)')
-    if not df.empty:
-        available_lockers = df[df['status'] == 'available']['locker_id'].tolist()
-    else:
-        available_lockers = []
-
+    # --- 登録フォーム ---
     if not available_lockers:
-        st.info('空きロッカーなし')
+        st.warning("現在、空いているロッカーはありません。")
     else:
-        locker_no_reg_tab2 = st.selectbox('ロッカー選択', available_lockers, key='admin_reg_sel', index=None, placeholder="選択...")
-        student_id_reg_tab2 = st.text_input('学籍番号', key='admin_reg_sid')
-        name_reg_tab2 = st.text_input('氏名', key='admin_reg_name')
-        
-        if st.button('登録', key='admin_reg_btn'):
-            if locker_no_reg_tab2 and student_id_reg_tab2 and name_reg_tab2:
-                rent_locker(locker_no_reg_tab2, student_id_reg_tab2, name_reg_tab2)
-                st.session_state.admin_message = f"{locker_no_reg_tab2} を登録しました"
-                st.rerun()
-
-    st.divider()
-    st.subheader('🗑️ 強制返却')
-    if not df.empty:
-        used_lockers = df[df['status'] == 'in_use']['locker_id'].tolist()
-        if used_lockers:
-            locker_no_del = st.selectbox('返却するロッカー', used_lockers, key='admin_del_sel', index=None, placeholder="選択...")
-            if st.button('強制返却', key='admin_del_btn'):
-                if locker_no_del:
-                    return_locker(locker_no_del)
-                    st.session_state.admin_message = f"{locker_no_del} を返却しました"
+        with st.form("user_rent_form"):
+            st.markdown("空いているロッカーを選択して、利用登録を行ってください。")
+            u_locker = st.selectbox("ロッカー番号", available_lockers)
+            u_sid = st.text_input("学籍番号 (例: 2403036)")
+            u_name = st.text_input("氏名 (例: 埼玉太郎)")
+            
+            # 返却機能は削除し、登録ボタンのみ配置
+            if st.form_submit_button("利用開始", type="primary"):
+                if not u_sid or not u_name:
+                    st.error("すべての項目を入力してください。")
+                elif rent_locker(u_locker, u_sid, u_name):
+                    st.success(f"ロッカー番号 {u_locker} を借りました！")
                     st.rerun()
 
     st.divider()
-    st.subheader('📋 全データ一覧')
+    st.caption("現在の空き状況")
     if not df.empty:
-        st.dataframe(df, use_container_width=True)
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("CSVダウンロード", csv, "lockers.csv", "text/csv")
+        status_view = df[['locker_id', 'status']].copy()
+        status_view['status'] = status_view['status'].apply(lambda x: "🔵 空き" if x == "available" else "🔴 使用中")
+        st.dataframe(status_view, hide_index=True, use_container_width=True)
 
-    st.divider()
+# ==========================================
+# 【タブ2】管理者画面
+# ==========================================
+with tab_admin:
+    st.header("管理者メニュー")
     
-    # ★★★ ここに追加しました ★★★
-    st.subheader('⚠️ システム管理')
-    col_sys1, col_sys2 = st.columns(2)
-    
-    with col_sys1:
-        st.warning("1〜200番のロッカーを初期化・作成します")
-        if st.button("データ初期化 (1~200番)", type="secondary"):
-            with st.spinner("作成中..."):
+    password = st.text_input("管理者パスワード", type="password")
+    if password == "admin123":
+        st.success("認証成功")
+        
+        # --- 1. 一覧表示 ---
+        st.subheader("📋 利用状況一覧")
+        if not df.empty:
+            st.dataframe(df, use_container_width=True)
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button("CSVダウンロード", csv, "lockers.csv", "text/csv")
+
+        st.divider()
+
+        # --- 2. 手動操作 ---
+        st.subheader("🛠️ 手動操作")
+        admin_action = st.radio("操作種別", ["代理貸出", "強制返却"], horizontal=True, key="admin_radio")
+
+        if admin_action == "代理貸出":
+            if not df.empty:
+                admin_avail = df[df['status'] == 'available']['locker_id'].tolist()
+                with st.form("admin_rent"):
+                    a_locker = st.selectbox("対象ロッカー", admin_avail)
+                    a_sid = st.text_input("学籍番号")
+                    a_name = st.text_input("氏名")
+                    if st.form_submit_button("登録"):
+                        rent_locker(a_locker, a_sid, a_name)
+                        st.rerun()
+
+        elif admin_action == "強制返却":
+            if not df.empty:
+                admin_use = df[df['status'] == 'in_use']['locker_id'].tolist()
+                with st.form("admin_ret"):
+                    a_ret_locker = st.selectbox("対象ロッカー", admin_use)
+                    if st.form_submit_button("強制返却"):
+                        return_locker(a_ret_locker)
+                        st.rerun()
+        
+        st.divider()
+
+        # --- 3. システム設定（初期化） ---
+        st.subheader("⚠️ システム設定")
+        st.warning("このボタンを押すと、ロッカー番号1〜200が作成・リセットされます。")
+        if st.button("データ初期化 (1~200番を作成)", type="secondary"):
+            with st.spinner("データベースを作成中..."):
                 if initialize_lockers():
-                    st.success("初期化完了")
+                    st.success("1番から200番のロッカーを作成しました！")
                     st.rerun()
-
-    with col_sys2:
-        st.error("テストデータ (L001〜L005) を削除します")
-        if st.button("テストデータ削除 (L001-L005)", type="primary"):
-            with st.spinner("削除中..."):
-                # L001〜L005を削除
-                for i in range(1, 6):
-                    delete_locker(f"L{i:03d}")
-                
-                # ついでに A001〜A003 もあれば削除（念のため）
-                for i in range(1, 4):
-                    delete_locker(f"A{i:03d}")
-
-                st.session_state.admin_message = "テストデータ (L001-L005) を削除しました！"
-                st.rerun()
-
-# --- メインロジック ---
-available_list_tab1 = df[df['status'] == 'available']['locker_id'].tolist() if not df.empty else []
-
-tab1, tab2 = st.tabs(["🗂️ 閲覧・登録用", "🔒 管理者用"])
-
-with tab1:
-    display_viewer_tab()
-
-with tab2:
-    authenticator.login(location='main')
-    if st.session_state["authentication_status"]:
-        current_user_email = st.session_state["name"] 
-        if current_user_email == ADMIN_EMAIL: 
-            st.write(f'Welcome *{current_user_email}* (Admin)')
-            authenticator.logout('Logout', 'main')
-            display_admin_tab()
-        else:
-            st.warning('あなたは管理者として登録されていません。')
-            authenticator.logout('Logout', 'main')
-    elif st.session_state["authentication_status"] is False:
-        st.error('Username/password is incorrect')
-    elif st.session_state["authentication_status"] is None:
-        st.info('管理者機能にアクセスするには、UsernameとPasswordでログインしてください。')
