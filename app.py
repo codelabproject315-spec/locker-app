@@ -28,12 +28,11 @@ def get_lockers():
         response = table.scan()
         items = response['Items']
         # 数字順 (1, 2, 10...) に並べ替えるための処理
-        # 数字以外(A-1など)が混ざっていてもエラーにならないように配慮
         def sort_key(item):
             try:
                 return int(item['locker_id'])
             except ValueError:
-                return 99999 # 数字じゃないものは最後尾へ
+                return 99999
         
         return sorted(items, key=sort_key)
     except ClientError as e:
@@ -44,9 +43,8 @@ def initialize_lockers():
     """1番から200番までのロッカーを一括作成・リセットする"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     try:
-        # BatchWriterを使って高速に書き込む
         with table.batch_writer() as batch:
-            for i in range(1, 201): # 1から200まで
+            for i in range(1, 201):
                 batch.put_item(Item={
                     'locker_id': str(i),
                     'status': 'available',
@@ -109,52 +107,35 @@ df = pd.DataFrame(lockers)
 tab_user, tab_admin = st.tabs(["🙋 利用者画面", "⚙️ 管理者画面"])
 
 # ==========================================
-# 【タブ1】利用者画面
+# 【タブ1】利用者画面（登録のみ）
 # ==========================================
 with tab_user:
-    st.header("利用申請")
+    st.header("利用開始 (登録)")
     
-    user_action = st.radio("操作を選択", ["利用開始 (借りる)", "利用終了 (返す)"], horizontal=True, key="user_radio")
-    
-    if user_action == "利用開始 (借りる)":
-        st.subheader("🔑 ロッカーを借りる")
-        if not df.empty and 'status' in df.columns:
-            available_lockers = df[df['status'] == 'available']['locker_id'].tolist()
-        else:
-            available_lockers = []
+    # --- 空きロッカーの取得 ---
+    if not df.empty and 'status' in df.columns:
+        available_lockers = df[df['status'] == 'available']['locker_id'].tolist()
+    else:
+        available_lockers = []
+        
+    # --- 登録フォーム ---
+    if not available_lockers:
+        st.warning("現在、空いているロッカーはありません。")
+    else:
+        with st.form("user_rent_form"):
+            st.markdown("空いているロッカーを選択して、利用登録を行ってください。")
+            u_locker = st.selectbox("ロッカー番号", available_lockers)
+            u_sid = st.text_input("学籍番号 (例: 2403036)")
+            u_name = st.text_input("氏名 (例: 埼玉太郎)")
             
-        if not available_lockers:
-            st.warning("現在、空いているロッカーはありません。")
-        else:
-            with st.form("user_rent_form"):
-                u_locker = st.selectbox("ロッカー番号", available_lockers)
-                u_sid = st.text_input("学籍番号 (例: 2403036)")
-                u_name = st.text_input("氏名 (例: 埼玉太郎)")
-                
-                if st.form_submit_button("利用開始", type="primary"):
-                    if not u_sid or not u_name:
-                        st.error("すべての項目を入力してください。")
-                    elif rent_locker(u_locker, u_sid, u_name):
-                        st.success(f"ロッカー番号 {u_locker} を借りました！")
-                        st.rerun()
+            # 返却機能は削除し、登録ボタンのみ配置
+            if st.form_submit_button("利用開始", type="primary"):
+                if not u_sid or not u_name:
+                    st.error("すべての項目を入力してください。")
+                elif rent_locker(u_locker, u_sid, u_name):
+                    st.success(f"ロッカー番号 {u_locker} を借りました！")
+                    st.rerun()
 
-    elif user_action == "利用終了 (返す)":
-        st.subheader("↩️ ロッカーを返す")
-        if not df.empty and 'status' in df.columns:
-            in_use_lockers = df[df['status'] == 'in_use']['locker_id'].tolist()
-        else:
-            in_use_lockers = []
-            
-        if not in_use_lockers:
-            st.info("使用中のロッカーはありません。")
-        else:
-            with st.form("user_return_form"):
-                u_ret_locker = st.selectbox("返却するロッカー", in_use_lockers)
-                if st.form_submit_button("返却する"):
-                    if return_locker(u_ret_locker):
-                        st.success(f"ロッカー番号 {u_ret_locker} を返却しました。")
-                        st.rerun()
-    
     st.divider()
     st.caption("現在の空き状況")
     if not df.empty:
