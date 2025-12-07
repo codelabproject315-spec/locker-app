@@ -29,7 +29,7 @@ def get_lockers():
         response = table.scan()
         items = response['Items']
         # locker_id順に並べ替え（1, 2, 3...）
-        return sorted(items, key=lambda x: int(x['locker_id']))
+        return sorted(items, key=lambda x: x['locker_id'])
     except ClientError as e:
         st.error(f"データ取得失敗: {e}")
         return []
