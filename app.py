@@ -27,7 +27,7 @@ def get_lockers():
     try:
         response = table.scan()
         items = response['Items']
-        # 数字順に並べ替え（数字以外は後ろへ）
+        # 数字順に並べ替え
         def sort_key(item):
             try:
                 return int(item['locker_id'])
@@ -117,8 +117,10 @@ with tab_user:
     st.divider()
     st.caption("現在の空き状況")
     if not df.empty:
+        # 利用者向けに見やすい表を作成
         status_view = df[['locker_id', 'status']].copy()
-        status_view['status'] = status_view['status'].apply(lambda x: "🔵 空き" if x == "available" else "🔴 使用中")
+        status_view = status_view.rename(columns={'locker_id': 'ロッカー番号', 'status': '状態'})
+        status_view['状態'] = status_view['状態'].replace({'available': '🔵 空き', 'in_use': '🔴 使用中'})
         st.dataframe(status_view, hide_index=True, use_container_width=True)
 
 # ==========================================
@@ -131,11 +133,36 @@ with tab_admin:
     if password == "admin123":
         st.success("認証成功")
         
-        # --- 1. 一覧表示 ---
+        # --- 1. 一覧表示（日本語化・列整理） ---
         st.subheader("📋 利用状況一覧")
         if not df.empty:
-            st.dataframe(df, use_container_width=True)
-            csv = df.to_csv(index=False).encode('utf-8')
+            # 表示用にデータをコピーして加工
+            display_df = df.copy()
+            
+            # 不要な列 (last_updated) を削除し、必要な列だけ抽出
+            # データフレームに存在するか確認してから抽出
+            target_cols = ['locker_id', 'status', 'student_id', 'user_name']
+            cols_to_use = [c for c in target_cols if c in display_df.columns]
+            display_df = display_df[cols_to_use]
+
+            # 列名を日本語に変更
+            display_df = display_df.rename(columns={
+                'locker_id': 'ロッカー番号',
+                'status': '状態',
+                'student_id': '学籍番号',
+                'user_name': '氏名'
+            })
+
+            # 状態の中身も日本語に変更
+            display_df['状態'] = display_df['状態'].replace({
+                'available': '空き',
+                'in_use': '使用中'
+            })
+
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            # CSVダウンロードも日本語化されたデータで行う
+            csv = display_df.to_csv(index=False).encode('utf-8')
             st.download_button("CSVダウンロード", csv, "lockers.csv", "text/csv")
 
         st.divider()
@@ -147,19 +174,28 @@ with tab_admin:
         if admin_action == "代理貸出":
             if not df.empty:
                 admin_avail = df[df['status'] == 'available']['locker_id'].tolist()
-                with st.form("admin_rent"):
-                    a_locker = st.selectbox("対象ロッカー", admin_avail)
-                    a_sid = st.text_input("学籍番号")
-                    a_name = st.text_input("氏名")
-                    if st.form_submit_button("登録"):
-                        rent_locker(a_locker, a_sid, a_name)
-                        st.rerun()
+                if not admin_avail:
+                    st.info("空きロッカーはありません。")
+                else:
+                    with st.form("admin_rent"):
+                        a_locker = st.selectbox("対象ロッカー", admin_avail)
+                        a_sid = st.text_input("学籍番号")
+                        a_name = st.text_input("氏名")
+                        if st.form_submit_button("登録"):
+                            if not a_sid or not a_name:
+                                st.error("入力が不足しています")
+                            else:
+                                rent_locker(a_locker, a_sid, a_name)
+                                st.rerun()
 
         elif admin_action == "強制返却":
             if not df.empty:
                 admin_use = df[df['status'] == 'in_use']['locker_id'].tolist()
-                with st.form("admin_ret"):
-                    a_ret_locker = st.selectbox("対象ロッカー", admin_use)
-                    if st.form_submit_button("強制返却"):
-                        return_locker(a_ret_locker)
-                        st.rerun()
+                if not admin_use:
+                    st.info("使用中のロッカーはありません。")
+                else:
+                    with st.form("admin_ret"):
+                        a_ret_locker = st.selectbox("対象ロッカー", admin_use)
+                        if st.form_submit_button("強制返却"):
+                            return_locker(a_ret_locker)
+                            st.rerun()
