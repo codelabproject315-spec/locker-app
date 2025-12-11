@@ -5,35 +5,6 @@ import pandas as pd
 from datetime import datetime
 
 # --------------------------------------------------
-# 0. 背景画像の設定 (CSSカスタマイズ)
-# --------------------------------------------------
-
-# ★★★ 取得した画像の公開URLをここに貼り付けてください ★★★
-# 例: GitHub PagesやS3などにアップロードした画像の直リンク
-BACKGROUND_IMAGE_URL =https://d.kuku.lu/4zbzxsbfa
-
-# 背景を設定するCSSコード
-st.markdown(
-    f"""
-    <style>
-    .stApp {{
-        background-image: url({BACKGROUND_IMAGE_URL});
-        background-size: cover; /* 画面全体に画像を拡大 */
-        background-attachment: fixed; /* スクロールしても背景を固定 */
-        background-repeat: no-repeat;
-        
-        /* 文字が背景と被って見えなくなるのを防ぐために、コンテンツに少し透明な背景を追加 */
-        background-color: rgba(255, 255, 255, 0.7); 
-    }}
-    .stApp > header {{
-        background-color: rgba(0,0,0,0); /* ヘッダーのStreamlitマークを透明に */
-    }}
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-# --------------------------------------------------
 # 1. AWS DynamoDBへの接続設定
 # --------------------------------------------------
 try:
