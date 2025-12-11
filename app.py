@@ -10,7 +10,7 @@ from datetime import datetime
 
 # ★★★ 取得した画像の公開URLをここに貼り付けてください ★★★
 # 例: GitHub PagesやS3などにアップロードした画像の直リンク
-BACKGROUND_IMAGE_URL = "https://d.kuku.lu/4zbzxsbfa" 
+BACKGROUND_IMAGE_URL =https://d.kuku.lu/4zbzxsbfa
 
 # 背景を設定するCSSコード
 st.markdown(
