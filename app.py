@@ -5,6 +5,44 @@ import pandas as pd
 from datetime import datetime
 
 # --------------------------------------------------
+# 0. 背景画像の設定 (CSSカスタマイズ)
+# --------------------------------------------------
+
+# ★★★ あなたの画像の公開URLをここに設定 ★★★
+BACKGROUND_IMAGE_URL = "https://raw.githubusercontent.com/codelabproject315-spec/locker-app/main/about01.jpg" 
+
+# 背景を設定するCSSコード
+st.markdown(
+    f"""
+    <style>
+    .stApp {{
+        background-image: url({BACKGROUND_IMAGE_URL});
+        background-size: cover; 
+        background-attachment: fixed;
+        background-repeat: no-repeat;
+        
+        /* コンテンツエリアの背景に半透明の白を適用し、文字を見やすくする */
+        background-color: rgba(255, 255, 255, 0.7); 
+    }}
+    /* メインコンテンツエリアの背景をさらに白くして文字を強調 */
+    [data-testid="stSidebar"] {{
+        background-color: rgba(255, 255, 255, 0.9);
+    }}
+    .main > div {{
+        background-color: rgba(255, 255, 255, 0.9); 
+        padding: 20px;
+        border-radius: 10px;
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# --------------------------------------------------
+# 1. AWS DynamoDBへの接続設定 ... （既存コードが続く）
+# --------------------------------------------------
+
+# --------------------------------------------------
 # 1. AWS DynamoDBへの接続設定
 # --------------------------------------------------
 try:
