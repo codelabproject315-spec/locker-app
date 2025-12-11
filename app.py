@@ -5,39 +5,50 @@ import pandas as pd
 from datetime import datetime
 
 # --------------------------------------------------
-# 0. 背景画像の設定 (CSSカスタマイズ)
+# 0. 背景画像と文字の可読性設定 (CSSカスタマイズ)
 # --------------------------------------------------
 
-# ★★★ あなたの画像の公開URLをここに設定 ★★★
-BACKGROUND_IMAGE_URL = "https://raw.githubusercontent.com/codelabproject315-spec/locker-app/main/about01.jpg" 
+# あなたの画像の公開URL
+BACKGROUND_IMAGE_URL = "https://raw.githubusercontent.com/codelabproject315-spec/locker-app/main/about01.jpg"
 
-# 背景を設定するCSSコード
 st.markdown(
     f"""
     <style>
+    /* 1. アプリ全体の背景に画像を設定 */
     .stApp {{
         background-image: url({BACKGROUND_IMAGE_URL});
-        background-size: cover; 
+        background-size: cover;
+        background-position: center center;
         background-attachment: fixed;
         background-repeat: no-repeat;
-        
-        /* コンテンツエリアの背景に半透明の白を適用し、文字を見やすくする */
-        background-color: rgba(255, 255, 255, 0.7); 
     }}
-    /* メインコンテンツエリアの背景をさらに白くして文字を強調 */
-    [data-testid="stSidebar"] {{
-        background-color: rgba(255, 255, 255, 0.9);
+
+    /* 2. メインコンテンツエリア（文字がある場所）の背景を半透明の白にする */
+    section[data-testid="stMain"] > div {{
+        background-color: rgba(255, 255, 255, 0.85); /* 白色の不透明度85% */
+        padding: 30px; /* 内側の余白を広げて見やすく */
+        border-radius: 15px; /* 角を丸くする */
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1); /* うっすら影をつけて立体感を出す */
+        margin-top: 20px; /* 上に少し隙間を空ける */
     }}
-    .main > div {{
-        background-color: rgba(255, 255, 255, 0.9); 
-        padding: 20px;
-        border-radius: 10px;
+
+    /* 3. サイドバーの背景も半透明の白にして統一感を出す */
+    section[data-testid="stSidebar"] > div {{
+         background-color: rgba(255, 255, 255, 0.9);
+    }}
+    
+    /* 4. ヘッダー（Streamlitのロゴ周り）を透明にして背景となじませる */
+    header[data-testid="stHeader"] {{
+        background-color: transparent;
     }}
     </style>
     """,
     unsafe_allow_html=True
 )
 
+# --------------------------------------------------
+# 1. AWS DynamoDBへの接続設定 ... （以下、既存のコードが続く）
+# --------------------------------------------------
 # --------------------------------------------------
 # 1. AWS DynamoDBへの接続設定 ... （既存コードが続く）
 # --------------------------------------------------
